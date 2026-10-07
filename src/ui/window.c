@@ -5,8 +5,9 @@ static WNDPROC gOldEditProc = NULL;
 
 static LRESULT CALLBACK EditSubProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_RBUTTONUP) {
-        /* Klik kanan di edit: popup Lookup */
+        /* Klik kanan di edit: popup Lookup + Select All */
         HMENU pop = CreatePopupMenu();
+        AppendMenuW(pop, MF_STRING, IDM_SELECTALL, L"Select All\tCtrl+A");
         AppendMenuW(pop, MF_STRING, IDM_LOOKUP, L"Lookup di Jisho\tCtrl+J");
         POINT pt;
         pt.x = LOWORD(lp); pt.y = HIWORD(lp);
@@ -162,6 +163,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_OPEN:   DoOpenFile();   return 0;
         case IDM_SAVE:   DoSaveFile(FALSE); return 0;
         case IDM_SAVEAS: DoSaveFile(TRUE);  return 0;
+        case IDM_LOOKUP: LookupSelection(); return 0;
+        case IDM_SELECTALL:
+            if (hEdit) {
+                SendMessageW(hEdit, EM_SETSEL, 0, -1);
+                SetFocus(hEdit);
+                UpdateStatusBar();
+            }
+            return 0;
         case IDM_EXIT:   PostMessageW(hwnd, WM_CLOSE, 0, 0); return 0;
         }
         return 0;

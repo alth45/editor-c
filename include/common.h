@@ -34,6 +34,7 @@
 #define IDM_SAVEAS       204
 #define IDM_EXIT         205
 #define IDM_LOOKUP       206
+#define IDM_SELECTALL    207
 
 #define TOOLBAR_HEIGHT   44
 #define SIDEBAR_WIDTH    420

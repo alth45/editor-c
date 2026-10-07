@@ -7,6 +7,7 @@ WebView2 (Chromium)** di sisi kanan untuk riset/baca referensi sambil nulis.
 ## Fitur saat ini
 
 - Edit multiline (New / Open / Save / Save As / Exit, `Ctrl+N/O/S`)
+- Select All (`Ctrl+A`) via menu **Edit**, klik kanan, atau shortcut
 - Indikator `*` kalau ada perubahan belum disimpan + konfirmasi saat keluar
 - Combo font Jepang (Yu Gothic UI, Meiryo, MS Gothic/Mincho, BIZ UD, dll)
 - Combo ukuran 8–72 pt, render ClearType + TrueType/OpenType

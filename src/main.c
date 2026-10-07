@@ -24,14 +24,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
     AppendMenuW(hFile, MF_STRING,    IDM_EXIT,   L"E&xit");
     AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)hFile, L"&File");
 
+    HMENU hEditMenu = CreatePopupMenu();
+    AppendMenuW(hEditMenu, MF_STRING, IDM_SELECTALL, L"Select &All\tCtrl+A");
+    AppendMenuW(hEditMenu, MF_STRING, IDM_LOOKUP,    L"Lookup di &Jisho\tCtrl+J");
+    AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)hEditMenu, L"&Edit");
+
     /* Accelerator */
     ACCEL accels[] = {
         { FVIRTKEY | FCONTROL, 'N', IDM_NEW  },
         { FVIRTKEY | FCONTROL, 'O', IDM_OPEN },
         { FVIRTKEY | FCONTROL, 'S', IDM_SAVE },
         { FVIRTKEY | FCONTROL, 'J', IDM_LOOKUP },
+        { FVIRTKEY | FCONTROL, 'A', IDM_SELECTALL },
     };
-    hAccel = CreateAcceleratorTableW(accels, 4);
+    hAccel = CreateAcceleratorTableW(accels, 5);
 
     /* Register class */
     WNDCLASSEXW wc;
