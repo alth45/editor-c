@@ -1,0 +1,7 @@
+# build output
+editor.exe
+wv2.nupkg
+# temp
+*.tmp
+*.obj
+*.o
