@@ -116,6 +116,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             NavigateSidebarFromEdit();
             return 0;
         }
+        /* Pilih URL dari dropdown riwayat -> langsung buka */
+        if (id == ID_HISTORY_COMBO && code == CBN_SELCHANGE) {
+            NavigateHistorySelection();
+            return 0;
+        }
+        /* Tombol Hapus: bersihkan riwayat URL */
+        if (id == ID_HISTORY_CLEAR) {
+            ClearUrlHistory();
+            return 0;
+        }
         if (id == ID_URL_EDIT && code == EN_CHANGE) {
             return 0;
         }
@@ -125,13 +135,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (id == ID_FONT_COMBO && code == CBN_SELCHANGE) {
             int sel = (int)SendMessageW(hFontCombo, CB_GETCURSEL, 0, 0);
-            if (sel != CB_ERR) { currentFontIndex = sel; ApplyFont(hwnd); }
+            if (sel != CB_ERR) {
+                currentFontIndex = sel;
+                ApplyFont(hwnd);
+                if (!modified) { modified = TRUE; SetTitle(); }
+                else UpdateStatusBar();
+            }
             SetFocus(hEdit);
             return 0;
         }
         if (id == ID_SIZE_COMBO && code == CBN_SELCHANGE) {
             int sel = (int)SendMessageW(hSizeCombo, CB_GETCURSEL, 0, 0);
-            if (sel != CB_ERR) { currentSizeIndex = sel; ApplyFont(hwnd); }
+            if (sel != CB_ERR) {
+                currentSizeIndex = sel;
+                ApplyFont(hwnd);
+                if (!modified) { modified = TRUE; SetTitle(); }
+                else UpdateStatusBar();
+            }
             SetFocus(hEdit);
             return 0;
         }

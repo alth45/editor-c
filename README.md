@@ -11,12 +11,16 @@ WebView2 (Chromium)** di sisi kanan untuk riset/baca referensi sambil nulis.
 - Indikator `*` kalau ada perubahan belum disimpan + konfirmasi saat keluar
 - Combo font Jepang (Yu Gothic UI, Meiryo, MS Gothic/Mincho, BIZ UD, dll)
 - Combo ukuran 8–72 pt, render ClearType + TrueType/OpenType
-- Save UTF-8 dengan BOM; load otomatis: UTF-16 LE / UTF-8 BOM /
-  UTF-8 tanpa BOM / ANSI (Shift-JIS di locale JP)
+- Save UTF-8 dengan BOM untuk `.txt`; load otomatis: UTF-16 LE /
+  UTF-8 BOM / UTF-8 tanpa BOM / ANSI (Shift-JIS di locale JP)
+- Format sesi `.edt` (default): simpan **teks + font + size + URL sidebar**
+  dalam satu file UTF-8. Buka `.edt` memulihkan semuanya.
 - Toolbar: font + size + tombol **Show Web / Hide Web** + **Jisho**
-- Sidebar kanan (420px): form URL + tombol **Go** + render WebView2
+- Sidebar kanan (420px): form URL + tombol **Go** + dropdown **riwayat URL** + **Hapus** + render WebView2
   - Ketik `google.com` otomatis jadi `https://google.com`
   - `Enter` di URL bar = Go
+  - Pilih entri di dropdown untuk buka ulang (maks 20, duplikat naik ke atas)
+  - URL bar + riwayat ikut update saat klik link/redirect di halaman
   - Default awal `https://www.bing.com/`
 - Status bar bawah (4 panel): `Ln/Col` caret | jumlah karakter |
   encoding (`UTF-8` / `UTF-8 BOM` / `UTF-16 LE` / `ANSI`) |
@@ -79,7 +83,22 @@ gcc -municode -DUNICODE -D_UNICODE -O2 -Iinclude -o editor.exe src\core\globals.
 1. Jalankan `editor.exe`
 2. Klik **Show Web**, ketik `jisho.org` lalu **Go** / `Enter`
 3. Blok kata Jepang -> klik **Jisho** / `Ctrl+J` untuk lookup
-4. Resize window: editor menyusut, sidebar tetap di kanan
+4. `Save` -> pilih `Editor Files (*.edt)` untuk simpan sesi lengkap
+5. Resize window: editor menyusut, sidebar tetap di kanan
+
+Contoh isi `catatan.edt` (UTF-8, bisa dibuka di notepad):
+
+```
+[JpEditor v1]
+font=Yu Gothic UI
+size=16
+url=https://jisho.org/search/日本語
+
+こんにちは、元気ですか。
+```
+
+Baris 1 magic + header `font/size/url` sampai baris kosong,
+sisanya body teks mentah. `.txt` biasa tetap dibuka sebagai teks polos.
 
 ## Troubleshooting
 
@@ -96,6 +115,8 @@ gcc -municode -DUNICODE -D_UNICODE -O2 -Iinclude -o editor.exe src\core\globals.
 - [x] Status bar: `Ln/Col`, jumlah karakter, encoding file, nama file
 - [x] Lookup Jepang: seleksi/kata -> Jisho.org di sidebar (`Jisho`, klik kanan, `Ctrl+J`)
 - [x] Struktur folder modular: `src/core`, `src/ui`, `src/web`, `include/`, `scripts/`, `docs/`
+- [x] Riwayat URL (dropdown) di sidebar + poll URL saat klik link
+- [x] Format sesi `.edt`: teks + font + size + URL web dalam satu file
 
 ### Prioritas tinggi (kecil, dampak besar)
 - [ ] Find/Replace (`Ctrl+F` / `Ctrl+H`) untuk dokumen panjang

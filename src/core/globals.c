@@ -13,6 +13,7 @@ BOOL suppressChange = FALSE;
 /* Sidebar / browser (dibuat di sidebar.c) */
 HWND hToggleBtn = NULL, hSidebar = NULL, hUrlEdit = NULL, hGoBtn = NULL, hBrowser = NULL;
 HWND hLookupBtn = NULL;
+HWND hHistoryCombo = NULL, hHistoryClearBtn = NULL;
 BOOL sidebarVisible = FALSE;
 int sidebarWidth = SIDEBAR_WIDTH;
 
@@ -43,3 +44,22 @@ const int numSizes = (int)(sizeof(sizes) / sizeof(sizes[0]));
 
 int currentFontIndex = 0;
 int currentSizeIndex = 6; /* = 16 pt */
+
+int FindFontIndex(const wchar_t *name) {
+    if (!name || !name[0]) return 0;
+    for (int i = 0; i < numFonts; i++)
+        if (_wcsicmp(japaneseFonts[i], name) == 0) return i;
+    return 0;
+}
+
+int FindSizeIndex(int pt) {
+    for (int i = 0; i < numSizes; i++)
+        if (sizes[i] == pt) return i;
+    /* fallback: ukuran terdekat */
+    int best = 0, bestDiff = 1000000;
+    for (int i = 0; i < numSizes; i++) {
+        int d = abs(sizes[i] - pt);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+    }
+    return best;
+}

@@ -5,11 +5,13 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
 #pragma comment(lib, "uuid.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
+#endif
 
 /* ==== State WebView2 ==== */
 static HMODULE hWv2Loader = NULL;
@@ -35,6 +37,100 @@ static void NormalizeUrl(const wchar_t *in, wchar_t *out, int outChars) {
 static void Wv2EnsureInit(void);
 static void Wv2Resize(void);
 static void Wv2DoNavigate(const wchar_t *url);
+
+/* ==== Riwayat URL (dropdown di sidebar) ====
+ * Array pointer, index 0 = terbaru. Maks HISTORY_MAX entri, duplikat
+ * dipindah ke atas, bukan diduplikasi. */
+static wchar_t *gHistory[HISTORY_MAX];
+static int gHistoryCount = 0;
+
+/* URL yang layak dicatat (tolak kosong / about:blank / data:) */
+static BOOL HistoryUsable(const wchar_t *u) {
+    if (!u || !u[0]) return FALSE;
+    if (_wcsnicmp(u, L"about:", 6) == 0) return FALSE;
+    if (_wcsnicmp(u, L"data:", 5) == 0)  return FALSE;
+    if (_wcsnicmp(u, L"edge:", 5) == 0)  return FALSE;
+    return TRUE;
+}
+
+/* Isi ulang combobox dari array + teks placeholder.
+ * CBS_DROPDOWNLIST tidak bisa SetWindowText sembarang: teks harus salah
+ * satu item. Jadi placeholder ikut jadi item index 0. */
+static void HistoryFillCombo(void) {
+    if (!hHistoryCombo) return;
+    SendMessageW(hHistoryCombo, CB_RESETCONTENT, 0, 0);
+    if (gHistoryCount == 0) {
+        SendMessageW(hHistoryCombo, CB_ADDSTRING, 0, (LPARAM)L"Belum ada riwayat");
+    } else {
+        wchar_t t[64];
+        wsprintfW(t, L"Riwayat URL (%d) — pilih untuk buka", gHistoryCount);
+        SendMessageW(hHistoryCombo, CB_ADDSTRING, 0, (LPARAM)t);
+        for (int i = 0; i < gHistoryCount; i++)
+            SendMessageW(hHistoryCombo, CB_ADDSTRING, 0, (LPARAM)gHistory[i]);
+    }
+    SendMessageW(hHistoryCombo, CB_SETCURSEL, 0, 0);
+}
+
+/* Catat URL: buang duplikat (pindah ke paling atas), buang entri terlama */
+static void HistoryAdd(const wchar_t *url) {
+    wchar_t u[2048];
+    if (!HistoryUsable(url)) return;
+    lstrcpynW(u, url, 2048);
+
+    for (int i = 0; i < gHistoryCount; i++) {
+        if (_wcsicmp(gHistory[i], u) != 0) continue;
+        if (i == 0) return;                 /* sudah di paling atas */
+        wchar_t *hit = gHistory[i];          /* geser entri lama ke bawah */
+        memmove(&gHistory[1], &gHistory[0], i * sizeof(wchar_t *));
+        gHistory[0] = hit;
+        HistoryFillCombo();
+        return;
+    }
+
+    if (gHistoryCount == HISTORY_MAX) {      /* buang yang terlama */
+        free(gHistory[HISTORY_MAX - 1]);
+        gHistory[HISTORY_MAX - 1] = NULL;
+        gHistoryCount--;
+    }
+    memmove(&gHistory[1], &gHistory[0], gHistoryCount * sizeof(wchar_t *));
+    gHistory[0] = (wchar_t *)malloc(2048 * sizeof(wchar_t));
+    if (!gHistory[0]) return;
+    lstrcpynW(gHistory[0], u, 2048);
+    gHistoryCount++;
+    HistoryFillCombo();
+}
+
+void ClearUrlHistory(void) {
+    for (int i = 0; i < gHistoryCount; i++) free(gHistory[i]);
+    ZeroMemory(gHistory, sizeof(gHistory));
+    gHistoryCount = 0;
+    HistoryFillCombo();
+}
+
+void NavigateHistorySelection(void) {
+    if (!hHistoryCombo) return;
+    int sel = (int)SendMessageW(hHistoryCombo, CB_GETCURSEL, 0, 0);
+    /* index 0 = placeholder/header, URL mulai index 1 */
+    if (sel == CB_ERR || sel <= 0) return;
+    int idx = sel - 1;
+    if (idx < 0 || idx >= gHistoryCount) return;
+    NavigateSidebar(gHistory[idx]);
+}
+
+/* Poll get_Source(): URL bar + riwayat ikut update saat user berpindah
+ * halaman lewat link/redirect (bukan cuma dari tombol Go). */
+static void Wv2PollSource(void) {
+    LPWSTR src = NULL;
+    if (!gWeb) return;
+    if (FAILED(gWeb->lpVtbl->get_Source(gWeb, &src)) || !src) return;
+    if (src[0] && _wcsicmp(src, pendingUrl) != 0) {
+        lstrcpynW(pendingUrl, src, 2048);
+        /* jangan timpa teks saat user sedang mengetik di URL bar */
+        if (hUrlEdit && GetFocus() != hUrlEdit) SetWindowTextW(hUrlEdit, src);
+        HistoryAdd(src);
+    }
+    CoTaskMemFree(src);
+}
 
 /* ==== Handler: Environment selesai dibuat ==== */
 static HRESULT STDMETHODCALLTYPE EnvQ(
@@ -136,6 +232,9 @@ static HRESULT STDMETHODCALLTYPE CtlInvoke(
     gCtl->lpVtbl->put_IsVisible(gCtl, TRUE);
     Wv2Resize();
 
+    /* Poll Source -> riwayat + URL bar ikut update saat klik link */
+    if (hSidebar) SetTimer(hSidebar, ID_POLL_TIMER, 1000, NULL);
+
     /* Navigasi pending (atau default) */
     if (pendingUrl[0]) Wv2DoNavigate(pendingUrl);
     else Wv2DoNavigate(L"https://www.bing.com/");
@@ -227,6 +326,7 @@ static void Wv2DoNavigate(const wchar_t *url) {
     if (!fixed[0]) return;
     lstrcpynW(pendingUrl, fixed, 2048);
     if (hUrlEdit) SetWindowTextW(hUrlEdit, fixed);
+    HistoryAdd(fixed);
     if (gWeb) gWeb->lpVtbl->Navigate(gWeb, fixed);
 }
 
@@ -249,15 +349,35 @@ void NavigateSidebarFromEdit(void) {
     SetFocus(hUrlEdit);
 }
 
+/* URL sesi untuk disimpan ke .edt (pendingUrl = sumber kebenaran) */
+void GetSidebarUrl(wchar_t *out, int outChars) {
+    if (!out || outChars <= 0) return;
+    if (hUrlEdit && GetFocus() == hUrlEdit) {
+        GetWindowTextW(hUrlEdit, out, outChars);
+        return;
+    }
+    lstrcpynW(out, pendingUrl, outChars);
+}
+
+void SetSidebarUrl(const wchar_t *url) {
+    lstrcpynW(pendingUrl, url ? url : L"", 2048);
+    if (hUrlEdit) SetWindowTextW(hUrlEdit, pendingUrl);
+}
+
 void LayoutSidebar(void) {
     if (!hSidebar) return;
     RECT rc;
     GetClientRect(hSidebar, &rc);
     int w = rc.right - rc.left;
-    int goW = 72, pad = 8;
+    int goW = 72, clearW = 64, pad = 8;
     int editW = max(60, w - goW - pad * 3);
     if (hUrlEdit) MoveWindow(hUrlEdit, pad, 10, editW, 24, TRUE);
     if (hGoBtn) MoveWindow(hGoBtn, pad + editW + pad, 8, goW, 28, TRUE);
+    /* Baris 2: riwayat */
+    int histW = max(60, w - clearW - pad * 3);
+    if (hHistoryCombo) MoveWindow(hHistoryCombo, pad, 44, histW, 240, TRUE);
+    if (hHistoryClearBtn) MoveWindow(hHistoryClearBtn, pad + histW + pad,
+                                     43, clearW, 26, TRUE);
     /* WebView2 tidak pakai child HWND hBrowser, jadi cukup resize bounds */
     Wv2Resize();
 }
@@ -267,6 +387,12 @@ static LRESULT CALLBACK SidebarProc(HWND hwnd, UINT msg,
     switch (msg) {
     case WM_SIZE:
         LayoutSidebar();
+        return 0;
+    case WM_TIMER:
+        if (wp == ID_POLL_TIMER) { Wv2PollSource(); return 0; }
+        break;
+    case WM_DESTROY:
+        KillTimer(hwnd, ID_POLL_TIMER);
         return 0;
     case WM_COMMAND:
         if (hMain) SendMessageW(hMain, WM_COMMAND, wp, lp);
@@ -347,10 +473,21 @@ void CreateSidebar(HWND parent) {
     hGoBtn = CreateWindowW(L"BUTTON", L"Go",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         220, 8, 72, 28, hSidebar, (HMENU)ID_GO_BTN, hInst, NULL);
+    /* Baris 2: dropdown riwayat URL + tombol Hapus */
+    hHistoryCombo = CreateWindowW(L"COMBOBOX", NULL,
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL |
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+        8, 44, 200, 240, hSidebar, (HMENU)ID_HISTORY_COMBO, hInst, NULL);
+    hHistoryClearBtn = CreateWindowW(L"BUTTON", L"Hapus",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        216, 43, 64, 26, hSidebar, (HMENU)ID_HISTORY_CLEAR, hInst, NULL);
     if (hUICtrlFont) {
         SendMessageW(hUrlEdit, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
         SendMessageW(hGoBtn, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
+        SendMessageW(hHistoryCombo, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
+        SendMessageW(hHistoryClearBtn, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
     }
+    HistoryFillCombo();
     ShowWindow(hSidebar, sidebarVisible ? SW_SHOW : SW_HIDE);
     LayoutSidebar();
     /* Init WebView2 async (butuh Runtime Edge) */
@@ -358,6 +495,7 @@ void CreateSidebar(HWND parent) {
 }
 
 void DestroySidebar(void) {
+    if (hSidebar) KillTimer(hSidebar, ID_POLL_TIMER);
     if (gWeb) { gWeb->lpVtbl->Release(gWeb); gWeb = NULL; }
     if (gCtl) { gCtl->lpVtbl->Close(gCtl); gCtl->lpVtbl->Release(gCtl); gCtl = NULL; }
     if (gEnv) { gEnv->lpVtbl->Release(gEnv); gEnv = NULL; }
@@ -366,6 +504,8 @@ void DestroySidebar(void) {
     hBrowser = NULL;
     hUrlEdit = NULL;
     hGoBtn = NULL;
+    hHistoryCombo = NULL;
+    hHistoryClearBtn = NULL;
     hSidebar = NULL;
 }
 

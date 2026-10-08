@@ -1,7 +1,25 @@
 # build output
 editor.exe
+editor_dbg.exe
+editor_test.exe
 wv2.nupkg
-# temp
+# runtime (ambil via scripts\get_wv2loader.bat)
+WebView2Loader.dll
+# logs & debug lokal
+*.log
 *.tmp
 *.obj
 *.o
+*.txt
+!README.md
+!docs/**/*.md
+# screenshot lokal
+*.png
+# script debug lokal
+crop.ps1
+ctrl.ps1
+inspect*.ps1
+shot.ps1
+debug.bat
+runcheck.bat
+smoke.bat

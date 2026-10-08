@@ -22,3 +22,12 @@ void ApplyFont(HWND hwnd) {
     hCurrentFont = CreateFontIndirectW(&lf);
     if (hEdit) SendMessageW(hEdit, WM_SETFONT, (WPARAM)hCurrentFont, TRUE);
 }
+
+/* Terapkan font + sinkron combo (dipakai setelah load .edt) */
+void ApplyFontSelection(void) {
+    ApplyFont(hMain ? hMain : hEdit);
+    if (hFontCombo)
+        SendMessageW(hFontCombo, CB_SETCURSEL, currentFontIndex, 0);
+    if (hSizeCombo)
+        SendMessageW(hSizeCombo, CB_SETCURSEL, currentSizeIndex, 0);
+}

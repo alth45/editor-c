@@ -12,10 +12,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
+#endif
 
 /* ==== IDs ==== */
 #define ID_EDIT             101
@@ -27,6 +29,9 @@
 #define ID_BROWSER          107
 #define ID_STATUSBAR        108
 #define ID_LOOKUP_BTN       109
+#define ID_HISTORY_COMBO    110
+#define ID_HISTORY_CLEAR    111
+#define ID_POLL_TIMER       1
 
 #define IDM_NEW          201
 #define IDM_OPEN         202
@@ -38,7 +43,9 @@
 
 #define TOOLBAR_HEIGHT   44
 #define SIDEBAR_WIDTH    420
-#define URLBAR_HEIGHT    44
+/* 2 baris di sidebar: (1) URL + Go, (2) dropdown riwayat + Hapus */
+#define URLBAR_HEIGHT    76
+#define HISTORY_MAX      20
 
 /* ==== Globals (definisi ada di globals.c) ==== */
 extern HWND hMain, hEdit, hFontCombo, hSizeCombo, hStatus;
@@ -51,6 +58,7 @@ extern wchar_t currentEncoding[32];
 
 /* Sidebar / browser */
 extern HWND hToggleBtn, hSidebar, hUrlEdit, hGoBtn, hBrowser, hLookupBtn;
+extern HWND hHistoryCombo, hHistoryClearBtn;
 extern BOOL sidebarVisible;
 extern int sidebarWidth;
 
@@ -64,15 +72,23 @@ extern const int numSizes;
 extern int currentFontIndex;
 extern int currentSizeIndex;
 
+/* Cari index font/size yang valid (fallback 0) */
+int FindFontIndex(const wchar_t *name);
+int FindSizeIndex(int pt);
+
 /* ==== API antar modul ==== */
 void SetTitle(void);
 void ApplyFont(HWND hwnd);
+void ApplyFontSelection(void);
 void CreateStatusBar(HWND parent);
 void UpdateStatusBar(void);
 int StatusBarHeight(void);
 
 BOOL SaveFileTo(const wchar_t *path);
 BOOL LoadFileFrom(const wchar_t *path);
+/* URL sesi web (sidebar) untuk disimpan ke .edt */
+void GetSidebarUrl(wchar_t *out, int outChars);
+void SetSidebarUrl(const wchar_t *url);
 
 BOOL MaybeSave(void);
 BOOL DoSaveFile(BOOL saveAs);
@@ -86,6 +102,10 @@ void LayoutMainWindow(void);
 void LayoutSidebar(void);
 void NavigateSidebar(const wchar_t *url);
 void NavigateSidebarFromEdit(void);
+
+/* Riwayat URL di sidebar (sidebar_wv2.c) */
+void NavigateHistorySelection(void);
+void ClearUrlHistory(void);
 
 /* Lookup Jepang (lookup.c) */
 void LookupSelection(void);

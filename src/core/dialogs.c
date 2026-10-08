@@ -8,11 +8,11 @@ BOOL DoOpenFile(void) {
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner   = hMain;
-    ofn.lpstrFilter = L"Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"Editor Files (*.edt)\0*.edt\0Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile   = path;
     ofn.nMaxFile    = MAX_PATH;
     ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    ofn.lpstrDefExt = L"txt";
+    ofn.lpstrDefExt = L"edt";
 
     if (GetOpenFileNameW(&ofn)) {
         if (LoadFileFrom(path)) {
@@ -35,17 +35,16 @@ BOOL DoSaveFile(BOOL saveAs) {
         ZeroMemory(&ofn, sizeof(ofn));
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner   = hMain;
-        ofn.lpstrFilter = L"Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+        ofn.lpstrFilter = L"Editor Files (*.edt)\0*.edt\0Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
         ofn.lpstrFile   = path;
         ofn.nMaxFile    = MAX_PATH;
         ofn.Flags       = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-        ofn.lpstrDefExt = L"txt";
+        ofn.lpstrDefExt = L"edt";
         if (!GetSaveFileNameW(&ofn)) return FALSE;
         lstrcpynW(currentFile, path, MAX_PATH);
     }
     if (SaveFileTo(currentFile)) {
         modified = FALSE;
-        lstrcpynW(currentEncoding, L"UTF-8 BOM", 32);
         SetTitle();
         SetFocus(hEdit);
         return TRUE;
