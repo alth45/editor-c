@@ -29,6 +29,11 @@ WebView2 (Chromium)** di sisi kanan untuk riset/baca referensi sambil nulis.
   klik **Jisho** di toolbar / klik kanan **Lookup di Jisho** / `Ctrl+J`.
   Sidebar otomatis terbuka dan buka `https://jisho.org/search/<kata>`
   (URL-encoded UTF-8). Tanda baca `、。 「」 『』` tidak ikut.
+- Find (`Ctrl+F` / menu **Edit > Find...**) & Replace (`Ctrl+H` /
+  menu **Edit > Replace...**): popup modeless di kanan-atas
+  - `Enter` = cari maju, `Shift+Enter` = cari mundur, `F3` / `Shift+F3` = ulangi cari terakhir
+  - Opsi `Bedakan besar/kecil`, wrap-around otomatis, `Esc` tutup
+  - Replace: `Ganti Satu` / `Ganti Semua`; kata cari terisi otomatis dari seleksi editor
 
 ## Struktur folder
 
@@ -48,6 +53,7 @@ word-c/
       font.c          ApplyFont()
       statusbar.c     SetTitle() + status bar
       lookup.c        Lookup Jepang -> Jisho.org di sidebar
+      findreplace.c   Dialog Find/Replace modeless (Ctrl+F / Ctrl+H)
     web/
       sidebar_wv2.c   Sidebar + WebView2 (init/navigate/resize)
   scripts/
@@ -73,7 +79,7 @@ versi pinned dan meng-copy `runtimes/win-x64/native_uap/WebView2Loader.dll`
 ke folder `editor.exe`. Manual dari root:
 
 ```bat
-gcc -municode -DUNICODE -D_UNICODE -O2 -Iinclude -o editor.exe src\core\globals.c src\ui\font.c src\core\file_io.c src\core\dialogs.c src\ui\window.c src\ui\statusbar.c src\ui\lookup.c src\web\sidebar_wv2.c src\main.c -lcomctl32 -lcomdlg32 -lgdi32 -luser32 -lole32 -loleaut32 -luuid -lshlwapi -lshell32
+gcc -municode -DUNICODE -D_UNICODE -O2 -Iinclude -o editor.exe src\core\globals.c src\ui\font.c src\core\file_io.c src\core\dialogs.c src\ui\window.c src\ui\statusbar.c src\ui\lookup.c src\ui\findreplace.c src\web\sidebar_wv2.c src\main.c -lcomctl32 -lcomdlg32 -lgdi32 -luser32 -lole32 -loleaut32 -luuid -lshlwapi -lshell32
 ```
 
 > `-municode` wajib (entry `wWinMain`). Tanpa itu linker error `undefined reference to WinMain`.
@@ -83,8 +89,9 @@ gcc -municode -DUNICODE -D_UNICODE -O2 -Iinclude -o editor.exe src\core\globals.
 1. Jalankan `editor.exe`
 2. Klik **Show Web**, ketik `jisho.org` lalu **Go** / `Enter`
 3. Blok kata Jepang -> klik **Jisho** / `Ctrl+J` untuk lookup
-4. `Save` -> pilih `Editor Files (*.edt)` untuk simpan sesi lengkap
-5. Resize window: editor menyusut, sidebar tetap di kanan
+4. Cari teks: `Ctrl+F` (Find) / `Ctrl+H` (Replace) atau menu **Edit**
+5. `Save` -> pilih `Editor Files (*.edt)` untuk simpan sesi lengkap
+6. Resize window: editor menyusut, sidebar tetap di kanan
 
 Contoh isi `catatan.edt` (UTF-8, bisa dibuka di notepad):
 
@@ -107,6 +114,7 @@ sisanya body teks mentah. `.txt` biasa tetap dibuka sebagai teks polos.
 | Popup `WebView2Loader.dll tidak ditemukan` | DLL belum sejajar `editor.exe`. Jalankan `scripts\get_wv2loader.bat` |
 | Popup `WebView2 Runtime tidak ditemukan` | Install Edge / WebView2 Runtime Evergreen |
 | Klik Go tidak tampil apa-apa | Runtime belum siap; klik Go sekali lagi. Cek `WebView2Loader.dll` x64 (bukan x86) |
+| `Ctrl+F` / `Ctrl+H` tidak memunculkan popup Find | Sudah diperbaiki: dialog kini modeless owned-popup (`WS_POPUP`), bukan `WS_CHILD` yang tertutup `hEdit`. Rebuild dari `scripts\\build.bat` terbaru (sudah mencakup `src\\ui\\findreplace.c`) |
 | Situs modern rusak | Itu gejala engine IE lama (`docs\legacy\sidebar_ie.c`). Pakai build WebView2 (`src\web\sidebar_wv2.c`) |
 
 ## Saran fitur berikutnya
@@ -117,9 +125,9 @@ sisanya body teks mentah. `.txt` biasa tetap dibuka sebagai teks polos.
 - [x] Struktur folder modular: `src/core`, `src/ui`, `src/web`, `include/`, `scripts/`, `docs/`
 - [x] Riwayat URL (dropdown) di sidebar + poll URL saat klik link
 - [x] Format sesi `.edt`: teks + font + size + URL web dalam satu file
+- [x] Find/Replace (`Ctrl+F` / `Ctrl+H`): popup modeless + `F3`/`Shift+F3` + wrap-around
 
 ### Prioritas tinggi (kecil, dampak besar)
-- [ ] Find/Replace (`Ctrl+F` / `Ctrl+H`) untuk dokumen panjang
 - [ ] Tombol sidebar: Back / Forward / Reload / Home + `F5` reload
 - [ ] Word wrap toggle + zoom `Ctrl+scroll`
 

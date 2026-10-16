@@ -50,9 +50,9 @@ typedef struct _charrange { LONG cpMin; LONG cpMax; } CHARRANGE;
 #define ID_HISTORY_CLEAR    111
 #define ID_POLL_TIMER       1
 
-/* Dialog Find/Replace (findreplace.c) */
+/* Dialog Find/Replace (findreplace.c) — modeless owned-popup */
 #define IDD_FIND            300
-#define IDC_FIND_DLG        312   /* id window child dialog Find/Replace */
+#define IDC_FIND_DLG        312   /* id dialog Find/Replace (tidak dipakai sbg child id) */
 #define IDC_FIND_LABEL      301
 #define IDC_FIND_EDIT       302
 #define IDC_FIND_NEXT       303
@@ -150,7 +150,7 @@ void LookupWord(const wchar_t *word);
 
 /* Find/Replace (findreplace.c) — mode FALSE = Find (Ctrl+F), TRUE = Replace (Ctrl+H) */
 void ShowFindDialog(BOOL withReplace);
-/* True jika dialog Find/Replace sedang terbuka (dipakai untuk blokir accelerator) */
+/* True jika dialog Find/Replace sedang terbuka (dipakai message loop utk IsDialogMessageW) */
 BOOL FindDialogOpen(void);
 /* Handle dialog aktif (NULL kalau tertutup) — utk IsDialogMessageW di message loop */
 HWND FindDlgHandle(void);
