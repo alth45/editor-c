@@ -1,12 +1,25 @@
 #include "common.h"
 
 /* ==== Terapkan font ke edit control ==== */
+
+/* Cache DPI proses: GetDeviceCaps(LOGPIXELSY) tidak berubah selama proses
+ * berjalan, jadi cukup diambil sekali (hemat 2x GetDC/ReleaseDC tiap ganti
+ * font). */
+static int GetSysDpiY(void) {
+    static int dpi = 0;
+    if (dpi == 0) {
+        HDC hdc = GetDC(NULL);
+        dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+        ReleaseDC(NULL, hdc);
+        if (dpi <= 0) dpi = 96;
+    }
+    return dpi;
+}
+
 void ApplyFont(HWND hwnd) {
     if (hCurrentFont) { DeleteObject(hCurrentFont); hCurrentFont = NULL; }
 
-    HDC hdc = GetDC(hwnd);
-    int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
-    ReleaseDC(hwnd, hdc);
+    int dpi = GetSysDpiY();
 
     LOGFONTW lf;
     ZeroMemory(&lf, sizeof(lf));
