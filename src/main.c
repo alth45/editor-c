@@ -69,21 +69,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
-        /* Dialog Find/Replace sedang terbuka: navigasi tab / Enter (IDOK) /
-         * Esc harus lewat IsDialogMessageW dulu supaya default button
-         * "Selanjutnya" bekerja. Accelerator editor (Ctrl+letter) sengaja
-         * tidak diterjemahkan saat dialog aktif — kalau tidak, mengetik
-         * huruf di kolom cari bisa memicu menu utama. F3/Shift+F3 tetap
-         * jalan karena dikirim sebagai WM_COMMAND dari WndProc. */
+        /* Dialog Find/Replace sedang terbuka:
+         *  - Pesan yang berasal dari dialog (atau child-nya) diterjemahkan
+         *    IsDialogMessageW supaya Tab/Enter/Esc bekerja.
+         *  - Pesan lain (termasuk keyboard di editor & menu) TETAP lewat
+         *    TranslateAccelerator — inilah perbaikan bug: sebelumnya semua
+         *    accelerator diblokir saat dialog aktif, dan karena dialog kini
+         *    adalah window CHILD, beberapa pesan input tidak terdeteksi
+         *    sebagai "punya dialog" sehingga Ctrl+F berikutnya tampak mati. */
+        BOOL dlgMsg = FALSE;
         if (FindDialogOpen()) {
             HWND hDlg = FindDlgHandle();
-            if (hDlg &&
-                (msg.hwnd == hDlg || IsChild(hDlg, msg.hwnd))) {
+            if (hDlg && (msg.hwnd == hDlg || IsChild(hDlg, msg.hwnd))) {
+                dlgMsg = TRUE;
                 if (IsDialogMessageW(hDlg, &msg))
                     continue;
             }
-        } else {
-            /* TranslateAccelerator dulu supaya Ctrl+J/N/O/S tidak masuk ke edit */
+        }
+        if (!dlgMsg) {
+            /* Ctrl+F / Ctrl+H / Ctrl+J / ... selalu bisa, dialog terbuka atau tidak */
             if (TranslateAcceleratorW(hMain, hAccel, &msg))
                 continue;
         }

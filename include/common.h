@@ -52,6 +52,7 @@ typedef struct _charrange { LONG cpMin; LONG cpMax; } CHARRANGE;
 
 /* Dialog Find/Replace (findreplace.c) */
 #define IDD_FIND            300
+#define IDC_FIND_DLG        312   /* id window child dialog Find/Replace */
 #define IDC_FIND_LABEL      301
 #define IDC_FIND_EDIT       302
 #define IDC_FIND_NEXT       303

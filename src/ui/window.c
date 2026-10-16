@@ -142,8 +142,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ToggleSidebar();
             return 0;
         }
+        /* Find/Replace dari accelerator Ctrl+F/Ctrl+H maupun klik menu.
+         * Saat dialog sedang aktif, message loop sengaja TIDAK menerjemahkan
+         * accelerator — tapi pesan BN_CLICKED dari child dialog (mis.
+         * checkbox "Bedakan besar/kecil") bisa ter-route ke sini karena
+         * dialog adalah window child. Jangan sampai salah jalur: kalau
+         * sumbernya bukan menu/accelerator (code != 0), abaikan supaya
+         * popup tidak dibuat ulang (efek "muncul lalu hilang"). */
         if (id == IDM_FIND || id == IDM_REPLACE) {
+            if (FindDialogOpen() && code != 0) return 0;
             ShowFindDialog(id == IDM_REPLACE);
+            HWND hd = FindDlgHandle();
+            if (hd) SetFocus(GetDlgItem(hd, IDC_FIND_EDIT));
             return 0;
         }
         if (id == ID_LOOKUP_BTN || id == IDM_LOOKUP) {
