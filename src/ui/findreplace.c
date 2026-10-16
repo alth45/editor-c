@@ -36,8 +36,10 @@ static int  g_lastDir  = 1;       /* arah pencarian terakhir (F3 / Shift+F3) */
 
 #define FIND_BUF 4096             /* maks panjang kata cari/ganti */
 
-BOOL FindDialogOpen(void) { return g_hFindDlg != NULL; }
-HWND FindDlgHandle(void)  { return g_hFindDlg; }
+/* Status keberadaan dialog: pakai IsWindow (bukan pointer statis) supaya
+ * tetap benar walau window hancur tanpa WM_DESTROY sampai ke kita. */
+BOOL FindDialogOpen(void) { return g_hFindDlg != NULL && IsWindow(g_hFindDlg); }
+HWND FindDlgHandle(void)  { return FindDialogOpen() ? g_hFindDlg : NULL; }
 
 /* ---- ambil teks kolom edit (trim spasi/tab tepi) ---- */
 static void GetEditStr(HWND hBox, wchar_t *out, int outChars) {
@@ -136,13 +138,13 @@ static void DoFindStep(int dir) {
  * dir = 0 -> pakai arah cari terakhir; +1/-1 -> paksa arah.
  * Dipakai WndProc (F3 global saat dialog terbuka). ---- */
 void FindRepeatLast(int dir) {
-    if (!g_hFindDlg) return;
+    if (!FindDialogOpen()) return;
     DoFindStep(dir != 0 ? dir : g_lastDir);
 }
 
-void CloseFindDialog(void) {
-    if (g_hFindDlg) DestroyWindow(g_hFindDlg);   /* WM_DESTROY set NULL */
-}
+/* (deklarasi maju — definisi lengkap di bawah, dekat ShowFindDialog) */
+static void FinishFindDialog(HWND hDlg);
+void CloseFindDialog(void);
 
 /* ---- seleksi saat ini cocok dengan needle? ---- */
 static BOOL SelectionMatchesNeedle(const wchar_t *needle) {
@@ -324,11 +326,32 @@ static void LayoutFindDialog(void) {
     }
 }
 
+/* ---- tutup dialog (modeless): DestroyWindow; WM_DESTROY set NULL.
+ *   PENTING: jangan pernah memanggil EndDialog pada window modeless —
+ *   itu merusak state internal user32 dan membuat popup berikutnya
+ *   gagal muncul. ---- */
+static void FinishFindDialog(HWND hDlg) {
+    if (hDlg && IsWindow(hDlg)) DestroyWindow(hDlg);
+}
+
 /* ---- prosedure dialog (modeless, dipasang via DWL_DLGPROC) ---- */
 static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_INITDIALOG: {
-        SendMessageW(hDlg, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
+        /* font UI kadang belum siap saat dipanggil lewat jalur lain —
+         * buat cadangan lokal supaya dialog tetap terbaca normal */
+        static HFONT sFallbackFont = NULL;
+        HFONT hf = hUICtrlFont;
+        if (!hf) {
+            if (!sFallbackFont) {
+                int dpi = GetCachedDpiY();
+                sFallbackFont = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL,
+                    0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                    CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+            }
+            hf = sFallbackFont;
+        }
+        SendMessageW(hDlg, WM_SETFONT, (WPARAM)hf, TRUE);
         static const int kidIds[] = {
             IDC_FIND_LABEL, IDC_FIND_EDIT, IDC_MATCH_CASE,
             IDC_FIND_NEXT, IDC_FIND_PREV, IDC_FIND_STATUS,
@@ -337,7 +360,7 @@ static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
         };
         for (unsigned i = 0; i < sizeof(kidIds)/sizeof(kidIds[0]); i++) {
             HWND k = GetDlgItem(hDlg, kidIds[i]);
-            if (k) SendMessageW(k, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
+            if (k) SendMessageW(k, WM_SETFONT, (WPARAM)hf, TRUE);
         }
 
         /* prefill kata cari dari seleksi editor (praktis utk cari cepat) */
@@ -392,20 +415,22 @@ static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
             DoFindStep(+1);
             return TRUE;
         case IDCANCEL:                   /* Esc / X -> tutup */
-            DestroyWindow(hDlg);
+            FinishFindDialog(hDlg);
             return TRUE;
         }
-        return FALSE;
+        /* Kontrol tanpa penanganan eksplisit (mis. BS_AUTOCHECKBOX yang
+         * tidak dikode sendiri) harus di-pass ke DefDlgProcW agar status
+         * dialog tetap sehat — jangan kembalikan FALSE mentah. */
+        return DefDlgProcW(hDlg, msg, wp, lp);
     }
 
     case WM_CLOSE:
-        DestroyWindow(hDlg);
+        FinishFindDialog(hDlg);
         return TRUE;
 
     case WM_DESTROY:
-        g_hFindDlg = NULL;
+        if (g_hFindDlg == hDlg) g_hFindDlg = NULL;
         g_lastFrom = -1;
-        if (hEdit) SetFocus(hEdit);
         return TRUE;
     }
     return DefDlgProcW(hDlg, msg, wp, lp);
@@ -456,25 +481,35 @@ static HWND MakeButton(HWND parent, const wchar_t *text, int x, int y,
 void ShowFindDialog(BOOL withReplace) {
     if (!hEdit) return;
 
-    if (g_hFindDlg) {
-        /* sudah terbuka: angkat ke depan; Ctrl+H bisa upgrade ke mode Replace */
+    /* BUG FIX: dulu, saat dialog sudah ada, fungsi ini hanya memanggil
+     * SetForegroundWindow(). Kalau window lama sudah hancur/tersembunyi
+     * (pointer statis tidak di-reset), popup baru TIDAK PERNAH dibuat —
+     * itulah sebabnya Ctrl+F / menu Edit tampak "tidak memunculkan apa-apa".
+     * Sekarang: kalau masih terbuka cukup angkat + fokus; kalau stale,
+     * tutup bersih lalu jatuh ke jalur pembuatan window baru di bawah. */
+    if (g_hFindDlg && IsWindow(g_hFindDlg)) {
         if (withReplace && !g_withRepl) {
             g_withRepl = TRUE;
             SetWindowTextW(g_hFindDlg, L"Ganti / Replace");
             LayoutFindDialog();
         }
-        SetForegroundWindow(g_hFindDlg);
+        ShowWindow(g_hFindDlg, SW_SHOW);
+        UpdateWindow(g_hFindDlg);
         SetFocus(GetDlgItem(g_hFindDlg, IDC_FIND_EDIT));
         return;
+    }
+    if (g_hFindDlg) {          /* pointer basi -> bersihkan */
+        g_hFindDlg = NULL;
     }
 
     g_withRepl = withReplace;
     g_lastFrom = -1;
     HINSTANCE hInst = GetModuleHandleW(NULL);
 
-    /* class dialog didaftarkan sekali */
-    static ATOM sAtom = 0;
-    if (!sAtom) {
+    /* class dialog didaftarkan sekali (cek nama, bukan atom, agar aman
+     * terhadap kegagalan registrasi sebelumnya) */
+    static BOOL sRegistered = FALSE;
+    if (!sRegistered) {
         WNDCLASSEXW wc;
         ZeroMemory(&wc, sizeof(wc));
         wc.cbSize        = sizeof(wc);
@@ -483,18 +518,25 @@ void ShowFindDialog(BOOL withReplace) {
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
         wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
         wc.lpszClassName = L"JpEditorFindDlg";
-        sAtom = RegisterClassExW(&wc);
-        if (!sAtom) { g_withRepl = FALSE; return; }
+        if (!RegisterClassExW(&wc)) {
+            /* mungkin sudah terdaftar oleh percobaan sebelumnya — cek class */
+            WNDCLASSW qc;
+            if (!GetClassInfoW(hInst, L"JpEditorFindDlg", &qc)) {
+                g_withRepl = FALSE;
+                return;   /* registrasi benar-benar gagal */
+            }
+        }
+        sRegistered = TRUE;
     }
 
     int clientH = DlgHeightForMode();
-    g_hFindDlg = CreateWindowExW(WS_EX_DLGMODALFRAME,
-        (LPCWSTR)(INT_PTR)sAtom,
+    g_hFindDlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+        L"JpEditorFindDlg",
         withReplace ? L"Ganti / Replace" : L"Cari / Find",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT, CW_USEDEFAULT, 320, clientH,
-        hMain, NULL, hInst, NULL);
-    if (!g_hFindDlg) return;
+        WS_CHILD | WS_CAPTION | WS_SYSMENU,
+        0, 0, 320, clientH,
+        hMain, (HMENU)(INT_PTR)IDC_FIND_DLG, hInst, NULL);
+    if (!g_hFindDlg) { g_withRepl = FALSE; return; }
 
     /* prosedur dialog custom (DefDlgProcW jadi fallback di akhirnya) */
     SetWindowLongPtrW(g_hFindDlg, DWLP_DLGPROC, (LONG_PTR)FindDlgProc);
@@ -522,17 +564,25 @@ void ShowFindDialog(BOOL withReplace) {
 
     SendMessageW(g_hFindDlg, WM_INITDIALOG, 0, 0);
 
-    /* posisikan dialog di kanan-atas area klien utama biar tak menutupi teks */
-    RECT rcW, rcC;
-    GetWindowRect(g_hFindDlg, &rcW);
+    /* posisikan dialog di kanan-atas area klien utama (koordinat client,
+     * karena window ini child dari hMain) biar tak menutupi teks */
+    RECT rcC;
     GetClientRect(hMain, &rcC);
-    MapWindowPoints(hMain, NULL, (POINT *)&rcC.left, 1);
-    MapWindowPoints(hMain, NULL, (POINT *)&rcC.right, 1);
-    int dlgW = rcW.right - rcW.left, dlgH = rcW.bottom - rcW.top;
+    int dlgW = MulDiv(320, GetCachedDpiY(), 96);
     int x = rcC.right - dlgW - 16;
-    int y = rcC.top + TOOLBAR_HEIGHT + 8;
-    SetWindowPos(g_hFindDlg, HWND_TOP, x, y, dlgW, dlgH, SWP_NOACTIVATE);
+    if (x < 0) x = 0;
+    int y = TOOLBAR_HEIGHT + 8;
+    SetWindowPos(g_hFindDlg, NULL, x, y, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
 
-    ShowWindow(g_hFindDlg, SW_SHOWNORMAL);
-    SetForegroundWindow(g_hFindDlg);
+    /* pastikan visible & repaint — inti perbaikan bug "popup tidak muncul" */
+    ShowWindow(g_hFindDlg, SW_SHOW);
+    UpdateWindow(g_hFindDlg);
+    SetFocus(GetDlgItem(g_hFindDlg, IDC_FIND_EDIT));
+}
+
+/* ---- tutup dialog dari luar (WM_DESTROY main window) ---- */
+void CloseFindDialog(void) {
+    if (g_hFindDlg && IsWindow(g_hFindDlg)) DestroyWindow(g_hFindDlg);
+    g_hFindDlg = NULL;
 }
