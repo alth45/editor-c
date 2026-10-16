@@ -121,12 +121,29 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    /* F3 / Shift+F3: ulangi pencarian terakhir saat dialog Find/Replace
+     * masih terbuka (fokus boleh di editor, toolbar, atau dialog).
+     * Kalau fokus di kolom edit dialog, subclass-nya sudah menangani F3
+     * lebih dulu dan pesan tidak sampai ke sini — jadi tidak dobel. */
+    case WM_KEYDOWN: {
+        if (wp == VK_F3 && FindDialogOpen()) {
+            BOOL shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            FindRepeatLast(shift ? -1 : +1);
+            return 0;
+        }
+        break;
+    }
+
     case WM_COMMAND: {
         WORD id   = LOWORD(wp);
         WORD code = HIWORD(wp);
 
         if (id == ID_TOGGLE_SIDEBAR) {
             ToggleSidebar();
+            return 0;
+        }
+        if (id == IDM_FIND || id == IDM_REPLACE) {
+            ShowFindDialog(id == IDM_REPLACE);
             return 0;
         }
         if (id == ID_LOOKUP_BTN || id == IDM_LOOKUP) {
@@ -230,6 +247,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_DESTROY:
+        CloseFindDialog();     /* dialog Find/Replace ikut ditutup */
         DestroySidebar();
         if (hCurrentFont) DeleteObject(hCurrentFont);
         if (hUICtrlFont)  DeleteObject(hUICtrlFont);

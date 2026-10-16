@@ -50,6 +50,20 @@ typedef struct _charrange { LONG cpMin; LONG cpMax; } CHARRANGE;
 #define ID_HISTORY_CLEAR    111
 #define ID_POLL_TIMER       1
 
+/* Dialog Find/Replace (findreplace.c) */
+#define IDD_FIND            300
+#define IDC_FIND_LABEL      301
+#define IDC_FIND_EDIT       302
+#define IDC_FIND_NEXT       303
+#define IDC_FIND_PREV       304
+#define IDC_MATCH_CASE      305
+#define IDC_WRAP_LABEL      306
+#define IDC_FIND_STATUS     307
+#define IDC_REPLACE_LABEL   308
+#define IDC_REPLACE_EDIT    309
+#define IDC_REPLACE_ONE     310
+#define IDC_REPLACE_ALL     311
+
 #define IDM_NEW          201
 #define IDM_OPEN         202
 #define IDM_SAVE         203
@@ -57,6 +71,8 @@ typedef struct _charrange { LONG cpMin; LONG cpMax; } CHARRANGE;
 #define IDM_EXIT         205
 #define IDM_LOOKUP       206
 #define IDM_SELECTALL    207
+#define IDM_FIND         208
+#define IDM_REPLACE      209
 
 #define TOOLBAR_HEIGHT   44
 #define SIDEBAR_WIDTH    420
@@ -130,6 +146,18 @@ void ClearUrlHistory(void);
 /* Lookup Jepang (lookup.c) */
 void LookupSelection(void);
 void LookupWord(const wchar_t *word);
+
+/* Find/Replace (findreplace.c) — mode FALSE = Find (Ctrl+F), TRUE = Replace (Ctrl+H) */
+void ShowFindDialog(BOOL withReplace);
+/* True jika dialog Find/Replace sedang terbuka (dipakai untuk blokir accelerator) */
+BOOL FindDialogOpen(void);
+/* Handle dialog aktif (NULL kalau tertutup) — utk IsDialogMessageW di message loop */
+HWND FindDlgHandle(void);
+/* Ulangi pencarian terakhir searah dir (+1 maju / -1 mundur; 0 = arah terakhir)
+   — dipakai F3 global saat dialog Find/Replace terbuka */
+void FindRepeatLast(int dir);
+/* Tutup dialog Find/Replace (dipanggil saat main window ditutup) */
+void CloseFindDialog(void);
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 

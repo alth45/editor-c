@@ -26,6 +26,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
 
     HMENU hEditMenu = CreatePopupMenu();
     AppendMenuW(hEditMenu, MF_STRING, IDM_SELECTALL, L"Select &All\tCtrl+A");
+    AppendMenuW(hEditMenu, MF_STRING, IDM_FIND,      L"&Find...\tCtrl+F");
+    AppendMenuW(hEditMenu, MF_STRING, IDM_REPLACE,   L"&Replace...\tCtrl+H");
+    AppendMenuW(hEditMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hEditMenu, MF_STRING, IDM_LOOKUP,    L"Lookup di &Jisho\tCtrl+J");
     AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)hEditMenu, L"&Edit");
 
@@ -36,8 +39,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
         { FVIRTKEY | FCONTROL, 'S', IDM_SAVE },
         { FVIRTKEY | FCONTROL, 'J', IDM_LOOKUP },
         { FVIRTKEY | FCONTROL, 'A', IDM_SELECTALL },
+        { FVIRTKEY | FCONTROL, 'F', IDM_FIND },
+        { FVIRTKEY | FCONTROL, 'H', IDM_REPLACE },
     };
-    hAccel = CreateAcceleratorTableW(accels, 5);
+    hAccel = CreateAcceleratorTableW(accels,
+                (int)(sizeof(accels) / sizeof(accels[0])));
 
     /* Register class */
     WNDCLASSEXW wc;
@@ -63,9 +69,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
-        /* TranslateAccelerator dulu supaya Ctrl+J/N/O/S tidak masuk ke edit */
-        if (TranslateAcceleratorW(hMain, hAccel, &msg))
-            continue;
+        /* Dialog Find/Replace sedang terbuka: navigasi tab / Enter (IDOK) /
+         * Esc harus lewat IsDialogMessageW dulu supaya default button
+         * "Selanjutnya" bekerja. Accelerator editor (Ctrl+letter) sengaja
+         * tidak diterjemahkan saat dialog aktif — kalau tidak, mengetik
+         * huruf di kolom cari bisa memicu menu utama. F3/Shift+F3 tetap
+         * jalan karena dikirim sebagai WM_COMMAND dari WndProc. */
+        if (FindDialogOpen()) {
+            HWND hDlg = FindDlgHandle();
+            if (hDlg &&
+                (msg.hwnd == hDlg || IsChild(hDlg, msg.hwnd))) {
+                if (IsDialogMessageW(hDlg, &msg))
+                    continue;
+            }
+        } else {
+            /* TranslateAccelerator dulu supaya Ctrl+J/N/O/S tidak masuk ke edit */
+            if (TranslateAcceleratorW(hMain, hAccel, &msg))
+                continue;
+        }
         /* Enter di URL bar = Go (edit single-line di dalam STATIC parent) */
         if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN &&
             hUrlEdit && (msg.hwnd == hUrlEdit)) {
