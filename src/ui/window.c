@@ -18,11 +18,34 @@ static LRESULT CALLBACK EditSubProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         /* Teruskan juga agar menu bawaan edit tetap bisa muncul bila perlu */
     }
     LRESULT r = CallWindowProcW(gOldEditProc, hwnd, msg, wp, lp);
+
+    /* Refresh Ln/Col dengan coalescing: saat key-repeat, banyak WM_KEYUP
+     * masuk berturut-turut. Jadwalkan update lewat pesan privat hasil
+     * RegisterWindowMessageW; saat dieksekusi, semua duplikat yang masih
+     * mengantre dibuang -> UpdateStatusBar berjalan sekali per burst,
+     * bukan sekali per keystroke. */
+    static UINT sUpdateMsg = 0;
     switch (msg) {
     case WM_KEYUP:
     case WM_LBUTTONUP:
     case WM_SETFOCUS:
-        UpdateStatusBar();
+        if (!sUpdateMsg)
+            sUpdateMsg = RegisterWindowMessageW(L"JpEditor.StatusUpdate");
+        if (sUpdateMsg) {
+            PostMessageW(hwnd, sUpdateMsg, 0, 0);
+        } else {
+            UpdateStatusBar();   /* fallback kalau register gagal */
+        }
+        break;
+    default:
+        if (sUpdateMsg && msg == sUpdateMsg) {
+            /* buang jadwal duplikat yang masih mengantre */
+            MSG peek;
+            while (PeekMessageW(&peek, hwnd, sUpdateMsg, sUpdateMsg,
+                                PM_REMOVE)) { /* drain */ }
+            UpdateStatusBar();
+            return r;
+        }
         break;
     }
     return r;
@@ -65,9 +88,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             GetModuleHandleW(NULL), NULL);
 
         /* Font untuk UI (biar tetap halus) */
-        HDC hdc = GetDC(hwnd);
-        int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
-        ReleaseDC(hwnd, hdc);
+        int dpi = GetCachedDpiY();
         hUICtrlFont = CreateFontW(-MulDiv(10, dpi, 72), 0,0,0, FW_NORMAL,
             0,0,0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Yu Gothic UI");
@@ -138,8 +159,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (sel != CB_ERR) {
                 currentFontIndex = sel;
                 ApplyFont(hwnd);
-                if (!modified) { modified = TRUE; SetTitle(); }
-                else UpdateStatusBar();
+                /* WM_SETFONT dengan repaint=TRUE sudah me-repaint edit;
+                 * cukup tandai modified + sinkron judul sekali saja. */
+                modified = TRUE;
+                SetTitle();
             }
             SetFocus(hEdit);
             return 0;
@@ -149,21 +172,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (sel != CB_ERR) {
                 currentSizeIndex = sel;
                 ApplyFont(hwnd);
-                if (!modified) { modified = TRUE; SetTitle(); }
-                else UpdateStatusBar();
+                modified = TRUE;
+                SetTitle();
             }
             SetFocus(hEdit);
             return 0;
         }
         if (id == ID_EDIT && code == EN_CHANGE) {
+            /* Satu refresh per keystroke: SetTitle() sudah memanggil
+             * UpdateStatusBar(), jadi jangan jalankan dua-duanya. */
             if (!suppressChange) {
                 if (!modified) { modified = TRUE; SetTitle(); }
-                else UpdateStatusBar();
+                else UpdateStatusBar();   /* chars/ln-col perlu ikut berubah */
             }
             return 0;
         }
         if (id == ID_EDIT && code == EN_UPDATE) {
-            UpdateStatusBar();
+            /* EN_UPDATE dikirim untuk SETIAP perubahan teks, termasuk yang
+             * ditekan suppressChange (New/Open/Load). Jangan update status
+             * di sini; biarkan EN_CHANGE (hanya untuk edit user) yang
+             * memicu — jauh lebih jarang dan hemat repaint. */
             return 0;
         }
 
@@ -176,6 +204,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 currentFile[0] = 0;
                 lstrcpynW(currentEncoding, L"UTF-8", 32);
                 modified = FALSE;
+                InvalidateStatusBarCache();
                 SetTitle();
                 SetFocus(hEdit);
             }

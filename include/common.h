@@ -83,6 +83,8 @@ void ApplyFontSelection(void);
 void CreateStatusBar(HWND parent);
 void UpdateStatusBar(void);
 int StatusBarHeight(void);
+/* Reset cache teks panel status (dipakai saat dokumen/file/encoding ganti) */
+void InvalidateStatusBarCache(void);
 
 BOOL SaveFileTo(const wchar_t *path);
 BOOL LoadFileFrom(const wchar_t *path);

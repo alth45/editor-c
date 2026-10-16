@@ -63,16 +63,16 @@ void LookupSelection(void) {
     DWORD sel = (DWORD)SendMessageW(hEdit, EM_GETSEL, 0, 0);
     int a = LOWORD(sel), b = HIWORD(sel);
     if (a != b) {
-        int n = b - a;
-        if (n > 200) { a = b - 200; n = 200; }
-        int total = GetWindowTextLengthW(hEdit);
-        wchar_t *all = (wchar_t *)malloc((total + 1) * sizeof(wchar_t));
-        if (!all) return;
-        GetWindowTextW(hEdit, all, total + 1);
+        /* Batasi dulu rentang yang akan disalin (maks 255 char + nul) */
+        if (b - a > 255) a = b - 255;
         wchar_t w[256];
-        wcsncpy(w, all + a, n);
-        w[n] = 0;
-        free(all);
+        w[0] = 0;
+        /* EM_GETSELTEXT dengan wParam = pointer CHARRANGE: salin HANYA
+         * rentang itu tanpa mengubah seleksi user dan tanpa menyalin
+         * seluruh dokumen (sebelumnya O(total char) tiap lookup). */
+        CHARRANGE cr;
+        cr.cpMin = (LONG)a; cr.cpMax = (LONG)b;
+        SendMessageW(hEdit, EM_GETSELTEXT, (WPARAM)&cr, (LPARAM)w);
         LookupWord(w);
         return;
     }

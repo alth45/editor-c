@@ -1,5 +1,7 @@
 #include "common.h"
 
+#include <wchar.h>   /* wcscmp */
+
 /* ==== Title ==== */
 void SetTitle(void) {
     wchar_t title[MAX_PATH + 64];
@@ -7,6 +9,20 @@ void SetTitle(void) {
     wsprintfW(title, L"%s%s - Japanese Text Editor", modified ? L"* " : L"", name);
     SetWindowTextW(hMain, title);
     UpdateStatusBar();
+}
+
+/* Cache teks panel: SB_SETTEXT memicu repaint; lewati kalau tidak berubah */
+static wchar_t gLastPart[4][MAX_PATH + 8] = { L"", L"", L"", L"" };
+
+static void SetStatusPartIfChanged(int idx, const wchar_t *text) {
+    if (wcscmp(gLastPart[idx], text) == 0) return;
+    lstrcpynW(gLastPart[idx], text, MAX_PATH + 8);
+    SendMessageW(hStatus, SB_SETTEXTW, idx, (LPARAM)text);
+}
+
+/* Reset cache saat status bar dibuat ulang / dokumen berganti total. */
+void InvalidateStatusBarCache(void) {
+    for (int i = 0; i < 4; i++) gLastPart[i][0] = 0;
 }
 
 /* ==== Status bar: Ln/Col | Chars | Encoding | File ==== */
@@ -21,6 +37,7 @@ void CreateStatusBar(HWND parent) {
     SendMessageW(hStatus, SB_SETPARTS, 4, (LPARAM)parts);
     if (hUICtrlFont)
         SendMessageW(hStatus, WM_SETFONT, (WPARAM)hUICtrlFont, TRUE);
+    InvalidateStatusBarCache();
     UpdateStatusBar();
 }
 
@@ -43,7 +60,8 @@ void UpdateStatusBar(void) {
     wchar_t sPos[64];
     wsprintfW(sPos, L"Ln %d, Col %d", line + 1, caret - lineStart + 1);
 
-    /* --- Jumlah karakter --- */
+    /* --- Jumlah karakter: GetWindowTextLength itu O(1) di EDIT control,
+     * tidak perlu menyalin teks (jangan pakai GetWindowText yang O(n)) --- */
     int len = GetWindowTextLengthW(hEdit);
     wchar_t sChars[64];
     wsprintfW(sChars, L"%d chars", len);
@@ -57,8 +75,9 @@ void UpdateStatusBar(void) {
     const wchar_t *name = currentFile[0] ? currentFile : L"Untitled";
     wsprintfW(sFile, L"%s%s", modified ? L"* " : L"", name);
 
-    SendMessageW(hStatus, SB_SETTEXTW, 0, (LPARAM)sPos);
-    SendMessageW(hStatus, SB_SETTEXTW, 1, (LPARAM)sChars);
-    SendMessageW(hStatus, SB_SETTEXTW, 2, (LPARAM)sEnc);
-    SendMessageW(hStatus, SB_SETTEXTW, 3, (LPARAM)sFile);
+    /* SB_SETTEXT memicu repaint panel; lewati kalau teks tidak berubah */
+    SetStatusPartIfChanged(0, sPos);
+    SetStatusPartIfChanged(1, sChars);
+    SetStatusPartIfChanged(2, sEnc);
+    SetStatusPartIfChanged(3, sFile);
 }

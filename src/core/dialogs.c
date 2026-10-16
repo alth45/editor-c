@@ -17,6 +17,8 @@ BOOL DoOpenFile(void) {
     if (GetOpenFileNameW(&ofn)) {
         if (LoadFileFrom(path)) {
             lstrcpynW(currentFile, path, MAX_PATH);
+            /* dokumen baru total: reset cache panel status */
+            InvalidateStatusBarCache();
             SetTitle();
             SetFocus(hEdit);
         } else {
@@ -45,6 +47,7 @@ BOOL DoSaveFile(BOOL saveAs) {
     }
     if (SaveFileTo(currentFile)) {
         modified = FALSE;
+        InvalidateStatusBarCache();   /* label encoding/file bisa berubah */
         SetTitle();
         SetFocus(hEdit);
         return TRUE;

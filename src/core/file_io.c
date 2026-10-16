@@ -15,34 +15,36 @@ static BOOL IsEdtPath(const wchar_t *path) {
     return _wcsicmp(path + n - 4, L".edt") == 0;
 }
 
-/* tulis string UTF-8; return FALSE jika gagal */
-static BOOL WriteU8(HANDLE hf, const wchar_t *w, int wlen) {
-    DWORD written = 0;
-    if (wlen < 0) wlen = (int)wcslen(w);
-    if (wlen == 0) return TRUE;
-    int u8len = WideCharToMultiByte(CP_UTF8, 0, w, wlen, NULL, 0, NULL, NULL);
-    if (u8len <= 0) return FALSE;
-    char *u8 = (char *)malloc(u8len);
-    if (!u8) return FALSE;
-    WideCharToMultiByte(CP_UTF8, 0, w, wlen, u8, u8len, NULL, NULL);
-    BOOL ok = WriteFile(hf, u8, u8len, &written, NULL) &&
-              written == (DWORD)u8len;
-    free(u8);
-    return ok;
-}
-
 /* ==== Save: .edt = header + teks; .txt = teks UTF-8 BOM ==== */
 BOOL SaveFileTo(const wchar_t *path) {
     int len = GetWindowTextLengthW(hEdit);
-    wchar_t *wbuf = (wchar_t *)malloc((len + 1) * sizeof(wchar_t));
+    if (len < 0) len = 0;                    /* guard alokasi negatif */
+    wchar_t *wbuf = (wchar_t *)malloc(((size_t)len + 1) * sizeof(wchar_t));
     if (!wbuf) return FALSE;
     GetWindowTextW(hEdit, wbuf, len + 1);
 
+    /* Konversi UTF-8 sekali saja di awal: dipakai untuk jalur .edt maupun
+     * .txt (sebelumnya teks dikonversi dua kali saat menyimpan .edt). */
+    char *u8 = NULL;
+    int u8len = 0;
+    if (len > 0) {
+        u8len = WideCharToMultiByte(CP_UTF8, 0, wbuf, len, NULL, 0, NULL, NULL);
+        if (u8len > 0) {
+            u8 = (char *)malloc((size_t)u8len);
+            if (!u8) { free(wbuf); return FALSE; }
+            if (WideCharToMultiByte(CP_UTF8, 0, wbuf, len, u8, u8len,
+                                    NULL, NULL) == 0) {
+                free(u8); free(wbuf); return FALSE;
+            }
+        }
+    }
+
     HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hf == INVALID_HANDLE_VALUE) { free(wbuf); return FALSE; }
+    if (hf == INVALID_HANDLE_VALUE) { free(u8); free(wbuf); return FALSE; }
 
     BOOL ok = TRUE;
+    DWORD written = 0;
     if (IsEdtPath(path)) {
         /* header sesi */
         wchar_t url[2048] = L"";
@@ -51,26 +53,34 @@ BOOL SaveFileTo(const wchar_t *path) {
         wsprintfW(head, L"%s\r\nfont=%s\r\nsize=%d\r\nurl=%s\r\n\r\n",
                   EDT_MAGIC, japaneseFonts[currentFontIndex],
                   sizes[currentSizeIndex], url);
-        ok = WriteU8(hf, head, -1) && WriteU8(hf, wbuf, len);
+        int hlen = WideCharToMultiByte(CP_UTF8, 0, head, -1, NULL, 0,
+                                       NULL, NULL);
+        if (hlen > 0) {
+            char *hu8 = (char *)malloc((size_t)hlen);
+            if (!hu8) ok = FALSE;
+            else {
+                WideCharToMultiByte(CP_UTF8, 0, head, -1, hu8, hlen,
+                                    NULL, NULL);
+                /* hlen termasuk terminator nul -> pakai hlen-1 */
+                ok = WriteFile(hf, hu8, (DWORD)(hlen - 1), &written, NULL) &&
+                     written == (DWORD)(hlen - 1);
+                free(hu8);
+            }
+        } else ok = FALSE;
+        if (ok && u8len > 0)
+            ok = WriteFile(hf, u8, (DWORD)u8len, &written, NULL) &&
+                 written == (DWORD)u8len;
         lstrcpynW(currentEncoding, L"EDT", 32);
     } else {
-        int u8len = WideCharToMultiByte(CP_UTF8, 0, wbuf, len,
-                                        NULL, 0, NULL, NULL);
-        char *u8 = NULL;
-        if (u8len > 0) {
-            u8 = (char *)malloc(u8len);
-            if (!u8) { free(wbuf); CloseHandle(hf); return FALSE; }
-            WideCharToMultiByte(CP_UTF8, 0, wbuf, len, u8, u8len, NULL, NULL);
-        }
-        DWORD written;
         BYTE bom[3] = { 0xEF, 0xBB, 0xBF };
-        ok = WriteFile(hf, bom, 3, &written, NULL);
+        ok = WriteFile(hf, bom, 3, &written, NULL) && written == 3;
         if (ok && u8len > 0)
-            ok = WriteFile(hf, u8, u8len, &written, NULL);
-        free(u8);
+            ok = WriteFile(hf, u8, (DWORD)u8len, &written, NULL) &&
+                 written == (DWORD)u8len;
         lstrcpynW(currentEncoding, L"UTF-8 BOM", 32);
     }
     CloseHandle(hf);
+    free(u8);
     free(wbuf);
     return ok;
 }
@@ -121,9 +131,18 @@ BOOL LoadFileFrom(const wchar_t *path) {
 
     BYTE *data = (BYTE *)malloc(size + 4);
     if (!data) { CloseHandle(hf); return FALSE; }
-    DWORD read = 0;
-    ReadFile(hf, data, size, &read, NULL);
+    /* Baca sampai tuntas: ReadFile bisa mengembalikan sebagian untuk
+     * file besar / drive jaringan (sebelumnya bagian yang belum terbaca
+     * ikut dipakai sebagai sampah memori). */
+    DWORD got = 0, chunk = 0;
+    BOOL rdOk = TRUE;
+    while (got < size) {
+        if (!ReadFile(hf, data + got, size - got, &chunk, NULL) ||
+            chunk == 0) { rdOk = FALSE; break; }
+        got += chunk;
+    }
     CloseHandle(hf);
+    if (!rdOk) { free(data); return FALSE; }
     data[size] = 0; data[size+1] = 0; data[size+2] = 0; data[size+3] = 0;
 
     wchar_t *wbuf = DecodeBytes(data, size);
@@ -179,7 +198,10 @@ BOOL LoadFileFrom(const wchar_t *path) {
         lstrcpynW(currentEncoding, L"EDT", 32);
 
         suppressChange = TRUE;
+        SendMessageW(hEdit, EM_SETREDRAW, FALSE, 0);   /* 1 repaint saja */
         SetWindowTextW(hEdit, body);
+        SendMessageW(hEdit, EM_SETREDRAW, TRUE, 0);
+        InvalidateRect(hEdit, NULL, TRUE);
         suppressChange = FALSE;
         modified = FALSE;
         free(wbuf);
@@ -191,7 +213,10 @@ BOOL LoadFileFrom(const wchar_t *path) {
         lstrcpynW(currentEncoding, L"UTF-8 BOM", 32);
 
     suppressChange = TRUE;
+    SendMessageW(hEdit, EM_SETREDRAW, FALSE, 0);
     SetWindowTextW(hEdit, wbuf);
+    SendMessageW(hEdit, EM_SETREDRAW, TRUE, 0);
+    InvalidateRect(hEdit, NULL, TRUE);
     suppressChange = FALSE;
     modified = FALSE;
     free(wbuf);
