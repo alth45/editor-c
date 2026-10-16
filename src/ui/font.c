@@ -5,7 +5,7 @@
 /* Cache DPI proses: GetDeviceCaps(LOGPIXELSY) tidak berubah selama proses
  * berjalan, jadi cukup diambil sekali (hemat 2x GetDC/ReleaseDC tiap ganti
  * font). */
-static int GetSysDpiY(void) {
+int GetCachedDpiY(void) {
     static int dpi = 0;
     if (dpi == 0) {
         HDC hdc = GetDC(NULL);
@@ -19,7 +19,7 @@ static int GetSysDpiY(void) {
 void ApplyFont(HWND hwnd) {
     if (hCurrentFont) { DeleteObject(hCurrentFont); hCurrentFont = NULL; }
 
-    int dpi = GetSysDpiY();
+    int dpi = GetCachedDpiY();
 
     LOGFONTW lf;
     ZeroMemory(&lf, sizeof(lf));

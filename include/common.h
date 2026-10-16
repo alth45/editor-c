@@ -9,8 +9,25 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <richedit.h>   /* EM_SETREDRAW, EM_GETSELTEXT, CHARRANGE */
 #include <stdio.h>
 #include <stdlib.h>
+
+/* Fallback bila richedit.h versi SDK tidak menyediakan definisi edit-control */
+#ifndef EM_SETREDRAW
+#define EM_SETREDRAW (WM_USER + 11)
+#endif
+#ifndef EM_GETSELTEXT
+#define EM_GETSELTEXT (WM_USER + 16)
+#endif
+/* CHARRANGE: sudah didefinisikan oleh richedit.h modern; fallback hanya
+ * untuk SDK/headers lama yang belum punya typedef tersebut. */
+#if !defined(RICHEDIT_H) && !defined(_RICHEDIT_) && !defined(__RPC_WIN32__)
+#ifndef _CHARRANGE_FALLBACK_
+#define _CHARRANGE_FALLBACK_
+typedef struct _charrange { LONG cpMin; LONG cpMax; } CHARRANGE;
+#endif
+#endif
 
 #ifdef _MSC_VER
 #pragma comment(lib, "comctl32.lib")
@@ -80,6 +97,7 @@ int FindSizeIndex(int pt);
 void SetTitle(void);
 void ApplyFont(HWND hwnd);
 void ApplyFontSelection(void);
+int  GetCachedDpiY(void);   /* DPI proses (cached), lihat font.c */
 void CreateStatusBar(HWND parent);
 void UpdateStatusBar(void);
 int StatusBarHeight(void);
