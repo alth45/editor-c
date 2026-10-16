@@ -143,14 +143,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         /* Find/Replace dari accelerator Ctrl+F/Ctrl+H maupun klik menu.
-         * Saat dialog sedang aktif, message loop sengaja TIDAK menerjemahkan
-         * accelerator — tapi pesan BN_CLICKED dari child dialog (mis.
-         * checkbox "Bedakan besar/kecil") bisa ter-route ke sini karena
-         * dialog adalah window child. Jangan sampai salah jalur: kalau
-         * sumbernya bukan menu/accelerator (code != 0), abaikan supaya
-         * popup tidak dibuat ulang (efek "muncul lalu hilang"). */
+         * Dialog modeless owned-POPUP: notifikasi kontrolnya masuk ke
+         * FindDlgProc, jadi semua WM_COMMAND IDM_FIND/REPLACE yang sampai
+         * ke sini pasti dari menu/accelerator -> selalu layani (ShowFindDialog
+         * menaikkan dialog kalau sudah terbuka). Jangan filter by code:
+         * accelerator datang dengan code=1, menu dengan code=0. */
         if (id == IDM_FIND || id == IDM_REPLACE) {
-            if (FindDialogOpen() && code != 0) return 0;
             ShowFindDialog(id == IDM_REPLACE);
             HWND hd = FindDlgHandle();
             if (hd) SetFocus(GetDlgItem(hd, IDC_FIND_EDIT));

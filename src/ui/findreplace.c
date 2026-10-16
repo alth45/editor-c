@@ -1,17 +1,9 @@
 #include "common.h"
 #include <wchar.h>   /* wcslen, wcsncmp, wmemcpy */
 
-/* Flag pencarian untuk EDIT control biasa (EM_FINDTEXT).
- * richedit.h punya FR_DOWN/FR_MATCHCASE untuk RichEdit; definisi ini
- * dipakai agar tetap tersedia di semua SDK. Untuk EM_FINDTEXT, flag
- * FR_DOWN = cari maju; tanpa FR_DOWN = cari mundur; FR_SKIPSEL =
- * mulai dari setelah seleksi saat ini (tidak dipakai di sini). */
-#ifndef FR_DOWN
-#define FR_DOWN       1
-#endif
-#ifndef FR_MATCHCASE
-#define FR_MATCHCASE  4   /* bedakan huruf besar/kecil */
-#endif
+/* Catatan kompatibilitas: editor memakai EDIT control biasa (bukan RichEdit),
+ * jadi pesan EM_FINDTEXTW / EM_EXSETSEL / EM_GETSELTEXT TIDAK tersedia.
+ * Pencarian dilakukan manual di salinan buffer (lihat DoFindStep). */
 
 /* ==== Find/Replace untuk dokumen panjang ====
  * Dialog modeless (satu instance, dua mode):
@@ -19,8 +11,8 @@
  *   - Replace  (Ctrl+H / menu Edit): + Ganti Satu / Ganti Semua
  *
  * Catatan desain (ramah dokumen besar):
- *   - Pencarian memakai EM_FINDTEXTW bawaan EDIT control — tidak ada
- *     penyalinan teks, jadi tetap ringan walau dokumennya panjang.
+ *   - Pencarian manual di salinan buffer + seleksi via EM_SETSEL —
+ *     tanpa pesan RichEdit (EDIT biasa tidak punya EM_FINDTEXTW).
  *   - "Ganti Semua" menyalin teks SEKALI (O(n)), mengganti in-memory,
  *     lalu menulis balik satu kali; bukan loop cari-ganti per kejadian.
  *   - Enter di kolom Find = cari maju; Shift+Enter = cari mundur.
@@ -70,22 +62,61 @@ static int NextStartPos(int foundMin, int foundMax) {
     return next;
 }
 
-/* ---- flag EM_FINDTEXT: arah + besar/kecil ---- */
-static LPARAM FindFlags(int dir) {
-    LPARAM f = (dir > 0) ? FR_DOWN : 0;
-    if (g_matchCase) f |= FR_MATCHCASE;
-    return f;
+/* ---- salinan dokumen sekali pakai (EDIT biasa: tanpa EM_FINDTEXT) ---- */
+static wchar_t *GetDocCopy(int *outLen) {
+    int len = GetWindowTextLengthW(hEdit);
+    if (len < 0) len = 0;
+    wchar_t *buf = (wchar_t *)malloc(((size_t)len + 1) * sizeof(wchar_t));
+    if (!buf) { if (outLen) *outLen = 0; return NULL; }
+    buf[0] = 0;
+    GetWindowTextW(hEdit, buf, len + 1);
+    if (outLen) *outLen = len;
+    return buf;
 }
 
-/* ---- Cari satu kejadian. dir: +1 maju, -1 mundur. Wrap-around otomatis. ---- */
+/* ---- cocok di posisi i? ---- */
+static BOOL MatchAt(const wchar_t *doc, int i, const wchar_t *needle, size_t nl) {
+    return g_matchCase ? (wcsncmp(doc + i, needle, nl) == 0)
+                       : (_wcsnicmp(doc + i, needle, nl) == 0);
+}
+
+/* ---- cari maju pertama pada [from, docLen) ---- */
+static int FindForwardPos(const wchar_t *doc, int docLen,
+                          const wchar_t *needle, size_t nl, int from) {
+    if (from < 0) from = 0;
+    if (nl == 0 || from + (int)nl > docLen) return -1;
+    for (int i = from; i + (int)nl <= docLen; i++)
+        if (MatchAt(doc, i, needle, nl)) return i;
+    return -1;
+}
+
+/* ---- cari mundur terakhir pada [0, from) ---- */
+static int FindBackwardPos(const wchar_t *doc, int docLen,
+                           const wchar_t *needle, size_t nl, int from) {
+    if (from > docLen) from = docLen;
+    if (nl == 0 || from < (int)nl) return -1;
+    for (int i = from - (int)nl; i >= 0; i--)
+        if (MatchAt(doc, i, needle, nl)) return i;
+    return -1;
+}
+
+/* ---- flag arah pencarian (penanda internal, bukan flag RichEdit).
+ * g_matchCase dibaca langsung oleh MatchAt(); tidak ada flag Win32. ---- */
+
+/* ---- Cari satu kejadian. dir: +1 maju, -1 mundur. Wrap-around otomatis.
+ * EDIT control biasa tidak punya EM_FINDTEXTW, jadi cari manual di
+ * salinan buffer + seleksi via EM_SETSEL (bukan EM_EXSETSEL). ---- */
 static void DoFindStep(int dir) {
     if (!hEdit || !g_hFindDlg) return;
     wchar_t needle[FIND_BUF];
     GetEditStr(GetDlgItem(g_hFindDlg, IDC_FIND_EDIT), needle, FIND_BUF);
     if (!needle[0]) { SetStatus(L"Kata cari kosong"); return; }
 
-    int docLen = GetWindowTextLengthW(hEdit);
-    if (docLen <= 0) { SetStatus(L"Dokumen kosong"); return; }
+    int docLen = 0;
+    wchar_t *doc = GetDocCopy(&docLen);
+    if (!doc) { SetStatus(L"Memori tidak cukup"); return; }
+    if (docLen <= 0) { free(doc); SetStatus(L"Dokumen kosong"); return; }
+    size_t nl = wcslen(needle);
 
     /* titik awal: lanjut dari pencarian terakhir, atau dari caret/seleksi */
     DWORD sel = (DWORD)SendMessageW(hEdit, EM_GETSEL, 0, 0);
@@ -98,24 +129,15 @@ static void DoFindStep(int dir) {
         from = (dir > 0) ? curMax : curMin;
     }
 
-    FINDTEXTEXW ft;
-    ZeroMemory(&ft, sizeof(ft));
-    ft.chrg.cpMin = from;
-    ft.chrg.cpMax = (dir > 0) ? -1 : 0;   /* -1 = sampai akhir dokumen */
-    ft.lpstrText  = needle;
-
-    LONG r = (LONG)SendMessageW(hEdit, EM_FINDTEXTW,
-                                FindFlags(dir), (LPARAM)&ft);
+    int pos = (dir > 0) ? FindForwardPos(doc, docLen, needle, nl, from)
+                        : FindBackwardPos(doc, docLen, needle, nl, from);
     BOOL wrapped = FALSE;
-    if (r == -1) {
+    if (pos < 0) {
         /* wrap-around: ulangi dari ujung lain dokumen */
-        ZeroMemory(&ft, sizeof(ft));
-        ft.chrg.cpMin = (dir > 0) ? 0 : docLen;
-        ft.chrg.cpMax = (dir > 0) ? -1 : 0;
-        ft.lpstrText  = needle;
-        r = (LONG)SendMessageW(hEdit, EM_FINDTEXTW,
-                               FindFlags(dir), (LPARAM)&ft);
-        if (r == -1) {
+        pos = (dir > 0) ? FindForwardPos(doc, docLen, needle, nl, 0)
+                        : FindBackwardPos(doc, docLen, needle, nl, docLen);
+        if (pos < 0) {
+            free(doc);
             wchar_t m[256 + FIND_BUF];
             wsprintfW(m, L"\"%s\" tidak ditemukan", needle);
             SetStatus(m);
@@ -125,11 +147,13 @@ static void DoFindStep(int dir) {
         wrapped = TRUE;
     }
 
-    CHARRANGE cr = { ft.chrgText.cpMin, ft.chrgText.cpMax };
-    SendMessageW(hEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
+    int foundMin = pos, foundMax = pos + (int)nl;
+    free(doc);
+
+    SendMessageW(hEdit, EM_SETSEL, foundMin, foundMax);
     SendMessageW(hEdit, EM_SCROLLCARET, 0, 0);
     UpdateStatusBar();
-    g_lastFrom = (dir > 0) ? NextStartPos(cr.cpMin, cr.cpMax) : cr.cpMin;
+    g_lastFrom = (dir > 0) ? NextStartPos(foundMin, foundMax) : foundMin;
     g_lastDir  = dir;
     SetStatus(wrapped ? L"Ditemukan (lanjutan dari awal dokumen)" : L"");
 }
@@ -143,18 +167,31 @@ void FindRepeatLast(int dir) {
 }
 
 /* (deklarasi maju — definisi lengkap di bawah, dekat ShowFindDialog) */
+static LRESULT CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp);
 static void FinishFindDialog(HWND hDlg);
 void CloseFindDialog(void);
 
-/* ---- seleksi saat ini cocok dengan needle? ---- */
+/* ---- seleksi saat ini cocok dengan needle?
+ * EDIT biasa: ambil slice via EM_GETSEL + GetWindowTextW (tanpa EM_GETSELTEXT
+ * yang hanya milik RichEdit). ---- */
 static BOOL SelectionMatchesNeedle(const wchar_t *needle) {
     DWORD sel = (DWORD)SendMessageW(hEdit, EM_GETSEL, 0, 0);
     int a = (int)LOWORD(sel), b = (int)HIWORD(sel);
     if (b <= a || b - a >= FIND_BUF) return FALSE;
-    CHARRANGE cr = { a, b };
+    int docLen = 0;
+    wchar_t *doc = GetDocCopy(&docLen);
+    if (!doc) return FALSE;
+    if (a < 0) a = 0;
+    if (b > docLen) b = docLen;
+    int n = b - a;
     wchar_t got[FIND_BUF];
     got[0] = 0;
-    SendMessageW(hEdit, EM_GETSELTEXT, (WPARAM)&cr, (LPARAM)got);
+    if (n > 0 && n < FIND_BUF) {
+        wcsncpy(got, doc + a, n);
+        got[n] = 0;
+    }
+    free(doc);
+    if (n <= 0) return FALSE;
     return g_matchCase ? (wcscmp(got, needle) == 0)
                        : (_wcsicmp(got, needle) == 0);
 }
@@ -334,8 +371,8 @@ static void FinishFindDialog(HWND hDlg) {
     if (hDlg && IsWindow(hDlg)) DestroyWindow(hDlg);
 }
 
-/* ---- prosedure dialog (modeless, dipasang via DWL_DLGPROC) ---- */
-static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
+/* ---- prosedure dialog (modeless, sudah jadi WndProc class) ---- */
+static LRESULT CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_INITDIALOG: {
         /* font UI kadang belum siap saat dipanggil lewat jalur lain —
@@ -368,12 +405,23 @@ static INT_PTR CALLBACK FindDlgProc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
             DWORD sel = (DWORD)SendMessageW(hEdit, EM_GETSEL, 0, 0);
             int a = (int)LOWORD(sel), b = (int)HIWORD(sel);
             if (b > a && b - a < FIND_BUF - 1) {
-                CHARRANGE cr = { a, b };
-                wchar_t w[FIND_BUF];
-                w[0] = 0;
-                SendMessageW(hEdit, EM_GETSELTEXT, (WPARAM)&cr, (LPARAM)w);
-                if (!wcschr(w, L'\r') && !wcschr(w, L'\n'))
-                    SetWindowTextW(GetDlgItem(hDlg, IDC_FIND_EDIT), w);
+                int docLen = 0;
+                wchar_t *doc = GetDocCopy(&docLen);
+                if (doc) {
+                    if (a < 0) a = 0;
+                    if (b > docLen) b = docLen;
+                    wchar_t w[FIND_BUF];
+                    w[0] = 0;
+                    if (b > a) {
+                        int n = b - a;
+                        if (n >= FIND_BUF) n = FIND_BUF - 1;
+                        wcsncpy(w, doc + a, n);
+                        w[n] = 0;
+                    }
+                    free(doc);
+                    if (w[0] && !wcschr(w, L'\r') && !wcschr(w, L'\n'))
+                        SetWindowTextW(GetDlgItem(hDlg, IDC_FIND_EDIT), w);
+                }
             }
         }
         CheckDlgButton(hDlg, IDC_MATCH_CASE,
@@ -488,12 +536,17 @@ void ShowFindDialog(BOOL withReplace) {
      * Sekarang: kalau masih terbuka cukup angkat + fokus; kalau stale,
      * tutup bersih lalu jatuh ke jalur pembuatan window baru di bawah. */
     if (g_hFindDlg && IsWindow(g_hFindDlg)) {
-        if (withReplace && !g_withRepl) {
-            g_withRepl = TRUE;
-            SetWindowTextW(g_hFindDlg, L"Ganti / Replace");
+        /* Sudah terbuka: sinkronkan mode (Find<->Replace), angkat + fokus.
+         * Tanpa ini Ctrl+F kedua / klik menu tampak "mati". */
+        if (g_withRepl != withReplace) {
+            g_withRepl = withReplace;
+            SetWindowTextW(g_hFindDlg,
+                withReplace ? L"Ganti / Replace" : L"Cari / Find");
             LayoutFindDialog();
         }
         ShowWindow(g_hFindDlg, SW_SHOW);
+        BringWindowToTop(g_hFindDlg);
+        SetForegroundWindow(g_hFindDlg);
         UpdateWindow(g_hFindDlg);
         SetFocus(GetDlgItem(g_hFindDlg, IDC_FIND_EDIT));
         return;
@@ -507,13 +560,17 @@ void ShowFindDialog(BOOL withReplace) {
     HINSTANCE hInst = GetModuleHandleW(NULL);
 
     /* class dialog didaftarkan sekali (cek nama, bukan atom, agar aman
-     * terhadap kegagalan registrasi sebelumnya) */
+     * terhadap kegagalan registrasi sebelumnya).
+     * PENTING: cbWndExtra = DLGWINDOWEXTRA wajib karena FindDlgProc
+     * memanggil DefDlgProcW (butuh slot DWL_*). Tanpa ini, state dialog
+     * rusak dan popup bisa gagal muncul / tombol tidak merespons. */
     static BOOL sRegistered = FALSE;
     if (!sRegistered) {
         WNDCLASSEXW wc;
         ZeroMemory(&wc, sizeof(wc));
         wc.cbSize        = sizeof(wc);
-        wc.lpfnWndProc   = DefDlgProcW;
+        wc.lpfnWndProc   = FindDlgProc;
+        wc.cbWndExtra    = DLGWINDOWEXTRA;
         wc.hInstance     = hInst;
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
         wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
@@ -530,16 +587,21 @@ void ShowFindDialog(BOOL withReplace) {
     }
 
     int clientH = DlgHeightForMode();
-    g_hFindDlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+    int dpiY = GetCachedDpiY();
+    int dlgW = MulDiv(320, dpiY, 96);
+    /* Modeless owned POPUP (bukan WS_CHILD): tidak ter-clipping/tertutup
+     * hEdit, punya caption sendiri, dan notifikasi kontrolnya masuk ke
+     * FindDlgProc (bukan ke WndProc utama). hMain jadi owner. */
+    g_hFindDlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
         L"JpEditorFindDlg",
         withReplace ? L"Ganti / Replace" : L"Cari / Find",
-        WS_CHILD | WS_CAPTION | WS_SYSMENU,
-        0, 0, 320, clientH,
-        hMain, (HMENU)(INT_PTR)IDC_FIND_DLG, hInst, NULL);
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        0, 0, dlgW, clientH,
+        hMain, NULL, hInst, NULL);
     if (!g_hFindDlg) { g_withRepl = FALSE; return; }
 
-    /* prosedur dialog custom (DefDlgProcW jadi fallback di akhirnya) */
-    SetWindowLongPtrW(g_hFindDlg, DWLP_DLGPROC, (LONG_PTR)FindDlgProc);
+    /* NOTE: FindDlgProc sudah jadi WndProc class (lihat registrasi di atas),
+     * jadi JANGAN SetWindowLongPtr(DWLP_DLGPROC) lagi di sini. */
 
     /* kontrol dibuat di posisi kasar; LayoutFindDialog menata ulang +
      * mengatur visibilitas panel Replace sesuai mode */
@@ -564,16 +626,15 @@ void ShowFindDialog(BOOL withReplace) {
 
     SendMessageW(g_hFindDlg, WM_INITDIALOG, 0, 0);
 
-    /* posisikan dialog di kanan-atas area klien utama (koordinat client,
-     * karena window ini child dari hMain) biar tak menutupi teks */
+    /* posisikan dialog owned-POPUP di kanan-atas area klien utama.
+     * Karena ini POPUP, koordinatnya SCREEN -> konversi dari client hMain. */
     RECT rcC;
     GetClientRect(hMain, &rcC);
-    int dlgW = MulDiv(320, GetCachedDpiY(), 96);
-    int x = rcC.right - dlgW - 16;
-    if (x < 0) x = 0;
-    int y = TOOLBAR_HEIGHT + 8;
-    SetWindowPos(g_hFindDlg, NULL, x, y, 0, 0,
-                 SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+    POINT pt = { rcC.right - dlgW - 16, TOOLBAR_HEIGHT + 8 };
+    if (pt.x < 0) pt.x = 0;
+    ClientToScreen(hMain, &pt);
+    SetWindowPos(g_hFindDlg, HWND_TOP, pt.x, pt.y, 0, 0,
+                 SWP_NOSIZE | SWP_SHOWWINDOW);
 
     /* pastikan visible & repaint — inti perbaikan bug "popup tidak muncul" */
     ShowWindow(g_hFindDlg, SW_SHOW);

@@ -69,20 +69,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdLine, int nCmdSh
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
-        /* Dialog Find/Replace sedang terbuka:
-         *  - Pesan yang berasal dari dialog (atau child-nya) diterjemahkan
-         *    IsDialogMessageW supaya Tab/Enter/Esc bekerja.
-         *  - Pesan lain (termasuk keyboard di editor & menu) TETAP lewat
-         *    TranslateAccelerator — inilah perbaikan bug: sebelumnya semua
-         *    accelerator diblokir saat dialog aktif, dan karena dialog kini
-         *    adalah window CHILD, beberapa pesan input tidak terdeteksi
-         *    sebagai "punya dialog" sehingga Ctrl+F berikutnya tampak mati. */
+        /* Dialog Find/Replace modeless owned-POPUP:
+         *  - IsDialogMessageW hanya untuk pesan milik dialog (Tab/Enter/Esc).
+         *  - IsChild() FALSE untuk owned popup, jadi cek juga: msg.hwnd
+         *    adalah dialog itu sendiri ATAU child dari dialog. Pesan lain
+         *    (WM_KEYDOWN Ctrl+F/H/J, menu, dsb) TETAP boleh jalan sebagai
+         *    accelerator: kalau IsDialogMessageW tidak memakannya,
+         *    teruskan ke TranslateAcceleratorW. Tanpa fallback ini Ctrl+F/H
+         *    tampak "mati" saat fokus ada di popup (itulah bug yang dilapor:
+         *    Ctrl+F tidak memunculkan apa-apa padahal dialog belum ada /
+         *    fokusnya pindah). */
         BOOL dlgMsg = FALSE;
         if (FindDialogOpen()) {
             HWND hDlg = FindDlgHandle();
             if (hDlg && (msg.hwnd == hDlg || IsChild(hDlg, msg.hwnd))) {
                 dlgMsg = TRUE;
                 if (IsDialogMessageW(hDlg, &msg))
+                    continue;
+                /* tidak dimakan dialog -> boleh jadi accelerator/menu */
+                if (TranslateAcceleratorW(hMain, hAccel, &msg))
                     continue;
             }
         }

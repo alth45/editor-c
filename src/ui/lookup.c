@@ -67,12 +67,21 @@ void LookupSelection(void) {
         if (b - a > 255) a = b - 255;
         wchar_t w[256];
         w[0] = 0;
-        /* EM_GETSELTEXT dengan wParam = pointer CHARRANGE: salin HANYA
-         * rentang itu tanpa mengubah seleksi user dan tanpa menyalin
-         * seluruh dokumen (sebelumnya O(total char) tiap lookup). */
-        CHARRANGE cr;
-        cr.cpMin = (LONG)a; cr.cpMax = (LONG)b;
-        SendMessageW(hEdit, EM_GETSELTEXT, (WPARAM)&cr, (LPARAM)w);
+        /* EDIT biasa tidak punya EM_GETSELTEXT (itu milik RichEdit):
+         * ambil slice via GetWindowTextW tanpa mengubah seleksi user. */
+        int docLen = GetWindowTextLengthW(hEdit);
+        if (docLen > 0 && a >= 0 && b <= docLen && b > a) {
+            wchar_t *doc = (wchar_t *)malloc(((size_t)docLen + 1) * sizeof(wchar_t));
+            if (doc) {
+                doc[0] = 0;
+                GetWindowTextW(hEdit, doc, docLen + 1);
+                int n = b - a;
+                if (n >= 256) n = 255;
+                wcsncpy(w, doc + a, n);
+                w[n] = 0;
+                free(doc);
+            }
+        }
         LookupWord(w);
         return;
     }
